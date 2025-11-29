@@ -1,42 +1,26 @@
-# .github/workflows/publish-nuget-reusable.yml
+# Donotify.Workflows/.github/workflows/publish-nuget.yaml
 name: Publish NuGet (Reusable)
 
 on:
   workflow_call:
     inputs:
-      # ベースバージョン (例: 0.1.0)
       base_version:
         required: true
         type: string
-
-      # プロジェクトの配列(JSON文字列)
-      # 例:
-      # [
-      #   { "name": "XXX", "csproj": "path/to.csproj" },
-      #   { "name": "YYY", "csproj": "path/to2.csproj" }
-      # ]
       projects:
         required: true
         type: string
-
-      # nuget.config のパス
       nuget_config_path:
         required: true
         type: string
-
-      # .NET SDK バージョン
       dotnet_version:
         required: false
         type: string
         default: '10.0.x'
-
-      # NuGet フィード URL
       feed_url:
         required: true
         type: string
-
     secrets:
-      # 呼び出し元から渡されるトークン (原則 GITHUB_TOKEN を渡す想定)
       nuget_token:
         required: true
 
@@ -51,7 +35,6 @@ concurrency:
 jobs:
   pack-and-push:
     runs-on: ubuntu-latest
-
     strategy:
       fail-fast: false
       matrix:
@@ -70,7 +53,6 @@ jobs:
         with:
           dotnet-version: ${{ inputs.dotnet_version }}
 
-      # nuget.config の %GITHUB_USER% / %NUGET_AUTH_TOKEN% を満たす
       - name: Map token to nuget.config envs
         shell: bash
         run: |
@@ -92,7 +74,6 @@ jobs:
             --artifacts-path ./artifacts \
             -p:Version="$VERSION"
 
-      # push は URL を直接指定（nuget.config のソース名に依存しない）
       - name: Push .nupkg to GitHub Packages
         run: |
           find ./artifacts -name "*.nupkg" -print0 | xargs -0 -I{} \
