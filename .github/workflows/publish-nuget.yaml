@@ -1,0 +1,102 @@
+# .github/workflows/publish-nuget-reusable.yml
+name: Publish NuGet (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      # ベースバージョン (例: 0.1.0)
+      base_version:
+        required: true
+        type: string
+
+      # プロジェクトの配列(JSON文字列)
+      # 例:
+      # [
+      #   { "name": "XXX", "csproj": "path/to.csproj" },
+      #   { "name": "YYY", "csproj": "path/to2.csproj" }
+      # ]
+      projects:
+        required: true
+        type: string
+
+      # nuget.config のパス
+      nuget_config_path:
+        required: true
+        type: string
+
+      # .NET SDK バージョン
+      dotnet_version:
+        required: false
+        type: string
+        default: '10.0.x'
+
+      # NuGet フィード URL
+      feed_url:
+        required: true
+        type: string
+
+    secrets:
+      # 呼び出し元から渡されるトークン (原則 GITHUB_TOKEN を渡す想定)
+      nuget_token:
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: nuget-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pack-and-push:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJson(inputs.projects) }}
+
+    env:
+      BASE_VERSION: ${{ inputs.base_version }}
+      FEED_URL: ${{ inputs.feed_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ inputs.dotnet_version }}
+
+      # nuget.config の %GITHUB_USER% / %NUGET_AUTH_TOKEN% を満たす
+      - name: Map token to nuget.config envs
+        shell: bash
+        run: |
+          echo "GITHUB_USER=${GITHUB_ACTOR}" >> $GITHUB_ENV
+          echo "NUGET_AUTH_TOKEN=${{ secrets.nuget_token }}" >> $GITHUB_ENV
+
+      - name: Restore (use checked-in nuget.config)
+        run: |
+          dotnet restore "${{ matrix.project.csproj }}" \
+            --configfile "${{ inputs.nuget_config_path }}"
+
+      - name: Pack (minimal)
+        shell: bash
+        run: |
+          DATE_JST=$(TZ=Asia/Tokyo date +'%Y%m%d')
+          VERSION="${BASE_VERSION}-${DATE_JST}.${GITHUB_RUN_NUMBER}"
+          dotnet pack "${{ matrix.project.csproj }}" \
+            -c Release \
+            --artifacts-path ./artifacts \
+            -p:Version="$VERSION"
+
+      # push は URL を直接指定（nuget.config のソース名に依存しない）
+      - name: Push .nupkg to GitHub Packages
+        run: |
+          find ./artifacts -name "*.nupkg" -print0 | xargs -0 -I{} \
+            dotnet nuget push "{}" \
+              --api-key "${{ secrets.nuget_token }}" \
+              --source "${FEED_URL}" \
+              --skip-duplicate
