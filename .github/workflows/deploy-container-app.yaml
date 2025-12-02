@@ -1,0 +1,93 @@
+# Donotify.Workflows/.github/workflows/deploy-container-app.yaml
+name: Deploy Azure Container App (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      app_source_path:
+        description: Path to the application source directory used for the Docker build context.
+        required: true
+        type: string
+      dockerfile_path:
+        description: Dockerfile path relative to the repository root.
+        required: true
+        type: string
+      container_app_name:
+        description: Existing Container App name to deploy to.
+        required: true
+        type: string
+      resource_group:
+        description: Resource group containing the Container App.
+        required: true
+        type: string
+      registry_url:
+        description: Azure Container Registry login server URL.
+        required: true
+        type: string
+      image_name:
+        description: Repository name in the registry (e.g., my-app/api).
+        required: true
+        type: string
+      image_tag:
+        description: Image tag to build and deploy. Defaults to the caller workflow's commit SHA.
+        required: false
+        type: string
+        default: "${{ github.sha }}"
+      ingress:
+        description: Ingress mode for the Container App (external/internal/disabled).
+        required: false
+        type: string
+        default: external
+      target_port:
+        description: Container port exposed by the app.
+        required: false
+        type: number
+        default: 8080
+    secrets:
+      azure_client_id:
+        required: true
+      azure_tenant_id:
+        required: true
+      azure_subscription_id:
+        required: true
+      registry_username:
+        required: true
+      registry_password:
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_TAG: ${{ inputs.image_tag }}
+      IMAGE_NAME: ${{ inputs.image_name }}
+      REGISTRY: ${{ inputs.registry_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.azure_client_id }}
+          tenant-id: ${{ secrets.azure_tenant_id }}
+          subscription-id: ${{ secrets.azure_subscription_id }}
+
+      - name: Build and Deploy Container App
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          registryUrl: ${{ env.REGISTRY }}
+          registryUsername: ${{ secrets.registry_username }}
+          registryPassword: ${{ secrets.registry_password }}
+          containerAppName: ${{ inputs.container_app_name }}
+          resourceGroup: ${{ inputs.resource_group }}
+          imageToBuild: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          imageToDeploy: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          appSourcePath: ${{ inputs.app_source_path }}
+          dockerfilePath: ${{ inputs.dockerfile_path }}
+          ingress: ${{ inputs.ingress }}
+          targetPort: ${{ inputs.target_port }}
