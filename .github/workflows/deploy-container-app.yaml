@@ -1,71 +1,63 @@
-# Donotify.Workflows/.github/workflows/deploy-container-app.yaml
 name: Deploy Azure Container App (Reusable)
 
 on:
   workflow_call:
     inputs:
-      app_source_path:
-        description: Path to the application source directory used for the Docker build context.
+      registry_url:
+        description: 'ACR の URL (例: donotifyprd-xxx.azurecr.io)'
         required: true
         type: string
-      dockerfile_path:
-        description: Dockerfile path relative to the repository root.
+      image_repository:
+        description: 'ACR のリポジトリ名 (例: ca-donotify-srv-user-prd-jpeast)'
         required: true
         type: string
       container_app_name:
-        description: Existing Container App name to deploy to.
+        description: '既存の Container App 名'
         required: true
         type: string
       resource_group:
-        description: Resource group containing the Container App.
+        description: 'Resource Group 名'
         required: true
         type: string
-      registry_url:
-        description: Azure Container Registry login server URL.
+      app_source_path:
+        description: 'ソースコードのパス (例: ./Donotify.Service.User)'
         required: true
         type: string
-      image_name:
-        description: Repository name in the registry (e.g., my-app/api).
+      dockerfile_path:
+        description: 'Dockerfile のパス (例: Donotify.Service.User/Dockerfile)'
         required: true
         type: string
-      image_tag:
-        description: Image tag to build and deploy. Defaults to the caller workflow's commit SHA.
-        required: false
-        type: string
-        default: "${{ github.sha }}"
-      ingress:
-        description: Ingress mode for the Container App (external/internal/disabled).
-        required: false
-        type: string
-        default: external
       target_port:
-        description: Container port exposed by the app.
-        required: false
+        description: 'コンテナがリッスンするポート (例: 8080)'
+        required: true
         type: number
-        default: 8080
-    secrets:
-      azure_client_id:
-        required: true
-      azure_tenant_id:
-        required: true
-      azure_subscription_id:
-        required: true
-      registry_username:
-        required: true
-      registry_password:
-        required: true
+      ingress:
+        description: 'ingress の種別 (external/internal)'
+        required: false
+        default: external
+        type: string
 
-permissions:
-  id-token: write
-  contents: read
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+      REGISTRY_USERNAME:
+        required: true
+      REGISTRY_PASSWORD:
+        required: true
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    env:
-      IMAGE_TAG: ${{ inputs.image_tag }}
-      IMAGE_NAME: ${{ inputs.image_name }}
-      REGISTRY: ${{ inputs.registry_url }}
+
+    permissions:
+      id-token: write   # OIDC 用
+      contents: read
+      packages: read
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -73,21 +65,31 @@ jobs:
       - name: Azure Login
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.azure_client_id }}
-          tenant-id: ${{ secrets.azure_tenant_id }}
-          subscription-id: ${{ secrets.azure_subscription_id }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Build and Deploy Container App
+      - name: Build and push, deploy
         uses: azure/container-apps-deploy-action@v2
         with:
-          registryUrl: ${{ env.REGISTRY }}
-          registryUsername: ${{ secrets.registry_username }}
-          registryPassword: ${{ secrets.registry_password }}
+          # ACR 認証
+          registryUrl: ${{ inputs.registry_url }}
+          registryUsername: ${{ secrets.REGISTRY_USERNAME }}
+          registryPassword: ${{ secrets.REGISTRY_PASSWORD }}
+
+          # 既存の Container App にデプロイ
           containerAppName: ${{ inputs.container_app_name }}
           resourceGroup: ${{ inputs.resource_group }}
-          imageToBuild: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          imageToDeploy: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+          # 同一タグでビルド → デプロイ
+          imageToBuild:  ${{ inputs.registry_url }}/${{ inputs.image_repository }}:${{ github.sha }}
+          imageToDeploy: ${{ inputs.registry_url }}/${{ inputs.image_repository }}:${{ github.sha }}
+
+          # Docker ビルド
           appSourcePath: ${{ inputs.app_source_path }}
           dockerfilePath: ${{ inputs.dockerfile_path }}
           ingress: ${{ inputs.ingress }}
           targetPort: ${{ inputs.target_port }}
+          buildArguments: |
+            GITHUB_USER=${{ github.actor }}
+            NUGET_AUTH_TOKEN=${{ secrets.GITHUB_TOKEN }}
